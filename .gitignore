@@ -1,0 +1,9 @@
+# Backend
+backend/venv/
+backend/__pycache__/
+backend/*.sqlite3  (Nếu bạn không muốn up database lên)
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.env
