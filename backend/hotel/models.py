@@ -24,18 +24,31 @@ class Area(models.Model):
 
 # --- 2. USERS ---
 class User(AbstractUser):
-    ROLE_CHOICES = (('ADMIN', 'Quản trị viên'), ('RECEPTIONIST', 'Lễ tân'), ('ACCOUNTANT', 'Kế toán'))
+    ROLE_CHOICES = (
+        ('ADMIN', 'Quản trị viên'),
+        ('MANAGER', 'Quản lý'),
+        ('RECEPTIONIST', 'Lễ tân'),
+        ('ACCOUNTANT', 'Kế toán'),
+        ('HOUSEKEEPING', 'Buồng phòng')
+    )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='RECEPTIONIST', verbose_name="Vai trò")
     branch = models.ForeignKey(Branch, on_delete=models.SET_NULL, null=True, blank=True, related_name='users', verbose_name="Chi nhánh")
+    
+    # Phân quyền chi tiết
+    permissions_config = models.JSONField(default=list, blank=True, verbose_name="Phân quyền chi tiết")
 
 # --- 3. ROOMS ---
 class RoomClass(models.Model):
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='room_classes')
     code = models.CharField(max_length=50)
     name = models.CharField(max_length=255)
+    
     base_price_hourly = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     base_price_daily = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     base_price_overnight = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    
+    hourly_price_config = models.JSONField(default=list, blank=True, verbose_name="Cấu hình giá theo giờ")
+    
     early_checkin_fee = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     late_checkout_fee = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     description = models.TextField(blank=True, null=True)
@@ -74,12 +87,15 @@ class Customer(models.Model):
         return self.full_name
 
 class Booking(models.Model):
-    # Status: CHECKED_IN (Đang ở), COMPLETED (Xong), RESERVED (Đặt trước), CANCELLED (Hủy)
     code = models.CharField(max_length=50, unique=True)
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE)
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE)
     status = models.CharField(max_length=20, default='CHECKED_IN')
     total_amount = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    
+    # --- CÁC TRƯỜNG THÔNG TIN ĐẶT PHÒNG ---
+    deposit = models.DecimalField(max_digits=12, decimal_places=0, default=0, verbose_name="Tiền đặt cọc") # <--- MỚI
+    people_count = models.IntegerField(default=1, verbose_name="Số người dự kiến") # <--- MỚI
     
     check_in_expected = models.DateTimeField(null=True, blank=True)
     check_out_expected = models.DateTimeField(null=True, blank=True)
@@ -100,7 +116,9 @@ class BookingRoom(models.Model):
     
     check_in_actual = models.DateTimeField(null=True, blank=True)
     check_out_actual = models.DateTimeField(null=True, blank=True)
+    
     price_snapshot = models.DecimalField(max_digits=12, decimal_places=0, default=0)
+    price_config_snapshot = models.JSONField(default=list, blank=True)
 
     def __str__(self):
         return f"{self.booking.code} - {self.room.name}"
@@ -193,7 +211,7 @@ class ActivityLog(models.Model):
     def __str__(self):
         return f"{self.user} - {self.action} - {self.created_at}"
 
-# --- 9. SETTINGS (MỚI: CẤU HÌNH HỆ THỐNG) ---
+# --- 9. SETTINGS ---
 class BranchSetting(models.Model):
     SURCHARGE_METHOD_CHOICES = (
         ('PERCENT', 'Theo phần trăm (%)'),
@@ -202,23 +220,25 @@ class BranchSetting(models.Model):
 
     branch = models.OneToOneField(Branch, on_delete=models.CASCADE, related_name='settings')
     
-    # 1. Cấu hình giờ chuẩn
     check_in_time = models.TimeField(default="14:00", verbose_name="Giờ nhận phòng chuẩn")
     check_out_time = models.TimeField(default="12:00", verbose_name="Giờ trả phòng chuẩn")
     
-    # 2. Cấu hình phụ thu quá giờ (Check-out muộn)
     overtime_method = models.CharField(
-        max_length=10, 
-        choices=SURCHARGE_METHOD_CHOICES, 
-        default='PERCENT',
+        max_length=10, choices=SURCHARGE_METHOD_CHOICES, default='PERCENT',
         verbose_name="Cách tính phụ thu quá giờ"
     )
-    # Lưu cả 2 giá trị để user chuyển đổi qua lại không bị mất số cũ
     overtime_percent = models.IntegerField(default=10, verbose_name="Phụ thu (%/giờ)")
     overtime_fixed = models.DecimalField(default=50000, max_digits=12, decimal_places=0, verbose_name="Phụ thu (VNĐ/giờ)")
-    
-    # Giới hạn: Sau bao nhiêu giờ thì tính 1 ngày
     overtime_threshold_hours = models.IntegerField(default=4, verbose_name="Giới hạn quá giờ (giờ) tính 1 ngày")
+
+    early_checkin_method = models.CharField(
+        max_length=10, choices=SURCHARGE_METHOD_CHOICES, default='PERCENT',
+        verbose_name="Cách tính phụ thu sớm"
+    )
+    early_checkin_percent = models.IntegerField(default=10, verbose_name="Phụ thu sớm (%/giờ)")
+    early_checkin_fixed = models.DecimalField(default=50000, max_digits=12, decimal_places=0, verbose_name="Phụ thu sớm (VNĐ/giờ)")
+    early_checkin_threshold_hours = models.IntegerField(default=4, verbose_name="Giới hạn sớm (giờ) tính 1 ngày")
+    early_checkin_free_hours = models.IntegerField(default=1, verbose_name="Số giờ miễn phí")
 
     def __str__(self):
         return f"Cài đặt - {self.branch.name}"

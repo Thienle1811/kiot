@@ -10,13 +10,13 @@ from datetime import timedelta, datetime
 from .models import (
     Branch, Area, RoomClass, Room, Booking, Customer, BookingRoom, 
     Product, ServiceOrder, User, CashFlow,
-    Device, MaintenanceLog, ActivityLog, BranchSetting # <--- Import model BranchSetting
+    Device, MaintenanceLog, ActivityLog, BranchSetting
 )
 from .serializers import (
     BranchSerializer, AreaSerializer, RoomClassSerializer, RoomSerializer, 
     BookingSerializer, ProductSerializer, ServiceOrderSerializer, 
     CustomerSerializer, UserSerializer, CashFlowSerializer,
-    DeviceSerializer, MaintenanceLogSerializer, ActivityLogSerializer, BranchSettingSerializer # <--- Import BranchSettingSerializer
+    DeviceSerializer, MaintenanceLogSerializer, ActivityLogSerializer, BranchSettingSerializer
 )
 
 class BranchViewSet(viewsets.ModelViewSet):
@@ -157,8 +157,12 @@ class RoomViewSet(viewsets.ModelViewSet):
         )
         
         price_snapshot = 0
+        price_config_snapshot = []
+
         if booking_type == 'HOURLY':
             price_snapshot = room.room_class.base_price_hourly
+            # Lưu lại bảng giá lũy tiến tại thời điểm check-in
+            price_config_snapshot = room.room_class.hourly_price_config 
         elif booking_type == 'OVERNIGHT':
             price_snapshot = room.room_class.base_price_overnight
         else:
@@ -169,7 +173,8 @@ class RoomViewSet(viewsets.ModelViewSet):
             booking=booking, room=room, 
             booking_type=booking_type,
             check_in_actual=timezone.now(), 
-            price_snapshot=price_snapshot
+            price_snapshot=price_snapshot,
+            price_config_snapshot=price_config_snapshot
         )
         room.status = 'OCCUPIED'
         room.save()
@@ -210,21 +215,82 @@ class RoomViewSet(viewsets.ModelViewSet):
             room_money = 0
             hours = 0 
             
-            # Tạm thời vẫn dùng logic cũ, sau này sẽ cập nhật dùng BranchSetting ở đây
+            # 1. TÍNH TIỀN PHÒNG (Room Money)
             if booking_room.booking_type == 'HOURLY':
-                hours = max(1, math.ceil(duration.total_seconds() / 3600))
-                room_money = hours * booking_room.price_snapshot
+                total_hours = max(1, math.ceil(duration.total_seconds() / 3600))
+                hours = total_hours
+                
+                config = booking_room.price_config_snapshot
+                
+                # Logic tính tiền lũy tiến (Tiered Pricing)
+                if config and isinstance(config, list) and len(config) > 0:
+                    room_money = 0
+                    price_map = {}
+                    next_price = 0
+                    
+                    # Parse config
+                    for item in config:
+                        if str(item.get('hour')).lower() == 'next':
+                            next_price = int(item.get('price', 0))
+                        else:
+                            try:
+                                price_map[int(item.get('hour'))] = int(item.get('price', 0))
+                            except ValueError: pass
+                    
+                    # Tính từng giờ
+                    for h in range(1, total_hours + 1):
+                        if h in price_map:
+                            room_money += price_map[h]
+                        else:
+                            # Nếu hết cấu hình, dùng giá 'next' hoặc giá của giờ cuối cùng
+                            room_money += next_price if next_price > 0 else (price_map.get(max(price_map.keys(), default=0), 0))
+                else:
+                    # Logic cũ: Nhân đều
+                    room_money = total_hours * booking_room.price_snapshot
+
             elif booking_room.booking_type == 'OVERNIGHT':
                 hours = math.ceil(duration.total_seconds() / 3600)
                 room_money = booking_room.price_snapshot 
             else:
+                # DAILY
                 days = max(1, math.ceil(duration.total_seconds() / 86400))
                 hours = days * 24 
                 room_money = days * booking_room.price_snapshot
             
+            # 2. TÍNH PHỤ THU CHECK-IN SỚM (Early Check-in Surcharge)
+            settings = getattr(room.branch, 'settings', None) # Lấy settings của chi nhánh
+            early_surcharge = 0
+            
+            if settings and settings.check_in_time:
+                # Chuyển đổi về múi giờ local
+                local_check_in = timezone.localtime(booking_room.check_in_actual)
+                # Tạo mốc giờ chuẩn: Ngày khách vào + Giờ chuẩn (VD: 14:00)
+                standard_check_in = timezone.make_aware(
+                    datetime.combine(local_check_in.date(), settings.check_in_time)
+                )
+                
+                # Nếu khách vào sớm hơn giờ chuẩn
+                if booking_room.check_in_actual < standard_check_in:
+                    early_diff_hours = (standard_check_in - booking_room.check_in_actual).total_seconds() / 3600
+                    # Trừ giờ miễn phí
+                    chargeable_hours = math.ceil(max(0, early_diff_hours - settings.early_checkin_free_hours))
+                    
+                    if chargeable_hours > 0:
+                        # Kiểm tra ngưỡng phạt 1 ngày
+                        if early_diff_hours >= settings.early_checkin_threshold_hours:
+                            early_surcharge = room.room_class.base_price_daily # Phạt 1 ngày
+                        else:
+                            # Tính theo công thức
+                            if settings.early_checkin_method == 'FIXED':
+                                early_surcharge = chargeable_hours * settings.early_checkin_fixed
+                            else: # PERCENT
+                                daily_price = room.room_class.base_price_daily
+                                early_surcharge = chargeable_hours * (settings.early_checkin_percent / 100) * daily_price
+
+            # 3. TỔNG HỢP TIỀN
             booking = booking_room.booking
             service_money = sum(s.quantity * s.unit_price_snapshot for s in booking.service_orders.all())
-            total_money = room_money + service_money
+            total_money = room_money + service_money + early_surcharge
 
             booking_room.check_out_actual = check_out_time
             booking_room.save()
@@ -234,15 +300,20 @@ class RoomViewSet(viewsets.ModelViewSet):
             room.status = 'AVAILABLE'
             room.save()
 
+            # Tạo mô tả cho phiếu thu
+            desc = f"Thu tiền {booking_room.get_booking_type_display()} phòng {room.name}"
+            if early_surcharge > 0:
+                desc += f" (Phụ thu sớm: {int(early_surcharge):,}đ)"
+
             CashFlow.objects.create(
                 branch=room.branch, booking=booking, flow_type='RECEIPT',
-                category='Thu tiền phòng', amount=total_money, description=f"Thu tiền {booking_room.get_booking_type_display()} phòng {room.name}"
+                category='Thu tiền phòng', amount=total_money, description=desc
             )
 
             ActivityLog.objects.create(
                 user=request.user if request.user.is_authenticated else None,
                 action="CHECK_OUT",
-                content=f"Trả phòng {room.name}. Khách: {booking.customer.full_name}. Tổng thu: {total_money:,} đ"
+                content=f"Trả phòng {room.name}. Khách: {booking.customer.full_name}. Tổng: {total_money:,}đ (Tiền phòng: {room_money:,}đ, Phụ thu sớm: {int(early_surcharge):,}đ)"
             )
 
             return Response({
@@ -252,7 +323,8 @@ class RoomViewSet(viewsets.ModelViewSet):
                     'customer': booking.customer.full_name, 
                     'room_name': room.name, 
                     'hours': hours, 
-                    'room_money': room_money, 
+                    'room_money': room_money,
+                    'early_surcharge': early_surcharge,
                     'service_money': service_money, 
                     'total_money': total_money,
                     'booking_type': booking_room.get_booking_type_display()
@@ -309,8 +381,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 booking_type = data.get('booking_type', 'DAILY')
                 
                 price_snapshot = 0
+                price_config_snapshot = []
+
                 if booking_type == 'HOURLY':
                     price_snapshot = room.room_class.base_price_hourly
+                    price_config_snapshot = room.room_class.hourly_price_config
                 elif booking_type == 'OVERNIGHT':
                     price_snapshot = room.room_class.base_price_overnight
                 else:
@@ -321,7 +396,8 @@ class BookingViewSet(viewsets.ModelViewSet):
                     booking=booking, 
                     room=room, 
                     booking_type=booking_type,
-                    price_snapshot=price_snapshot
+                    price_snapshot=price_snapshot,
+                    price_config_snapshot=price_config_snapshot
                 )
             except Room.DoesNotExist:
                 return Response({'error': 'Phòng không tồn tại'}, status=400)
@@ -383,6 +459,7 @@ class BookingViewSet(viewsets.ModelViewSet):
                 br.booking_type = new_booking_type
                 if new_booking_type == 'HOURLY':
                     br.price_snapshot = br.room.room_class.base_price_hourly
+                    br.price_config_snapshot = br.room.room_class.hourly_price_config
                 elif new_booking_type == 'OVERNIGHT':
                     br.price_snapshot = br.room.room_class.base_price_overnight
                 elif new_booking_type == 'DAILY':
@@ -480,6 +557,10 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = ActivityLog.objects.all().order_by('-created_at')
     serializer_class = ActivityLogSerializer
 
+class BranchSettingViewSet(viewsets.ModelViewSet):
+    queryset = BranchSetting.objects.all()
+    serializer_class = BranchSettingSerializer
+
 class ReportViewSet(viewsets.ViewSet):
     def get_date_range(self, request):
         filter_type = request.query_params.get('filter', 'this_month')
@@ -520,8 +601,3 @@ class ReportViewSet(viewsets.ViewSet):
         start, end = self.get_date_range(request)
         stats = BookingRoom.objects.filter(check_in_actual__date__range=[start, end]).values('room__name', 'room__room_class__name').annotate(booking_count=Count('id'), total_revenue=Sum('booking__total_amount')).order_by('-total_revenue')
         return Response(list(stats))
-
-# --- VIEWSET MỚI: QUẢN LÝ CẤU HÌNH ---
-class BranchSettingViewSet(viewsets.ModelViewSet):
-    queryset = BranchSetting.objects.all()
-    serializer_class = BranchSettingSerializer

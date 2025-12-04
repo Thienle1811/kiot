@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     Branch, Area, RoomClass, Room, Booking, Product, ServiceOrder, 
     Customer, User, BookingRoom, CashFlow,
-    Device, MaintenanceLog, ActivityLog, BranchSetting # <--- Import model BranchSetting
+    Device, MaintenanceLog, ActivityLog, BranchSetting
 )
 
 class BranchSerializer(serializers.ModelSerializer):
@@ -16,6 +16,7 @@ class AreaSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class RoomClassSerializer(serializers.ModelSerializer):
+    # JSONField hourly_price_config sẽ tự động được include vì dùng __all__
     class Meta:
         model = RoomClass
         fields = '__all__'
@@ -74,7 +75,7 @@ class BookingRoomDetailSerializer(serializers.ModelSerializer):
     room_name = serializers.CharField(source='room.name', read_only=True)
     class Meta:
         model = BookingRoom
-        fields = ['room_name', 'booking_type', 'check_in_actual', 'check_out_actual', 'price_snapshot']
+        fields = ['room_name', 'booking_type', 'check_in_actual', 'check_out_actual', 'price_snapshot', 'price_config_snapshot']
 
 class BookingSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source='customer.full_name', read_only=True)
@@ -84,7 +85,7 @@ class BookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booking
-        fields = ['id', 'code', 'customer_name', 'room_name', 'total_amount', 'status', 'created_at', 'service_orders', 'booking_details', 'check_in_expected', 'check_out_expected', 'note']
+        fields = ['id', 'code', 'customer_name', 'room_name', 'total_amount', 'status', 'created_at', 'service_orders', 'booking_details', 'check_in_expected', 'check_out_expected', 'note', 'deposit', 'people_count']
 
     def get_room_name(self, obj):
         first_room = obj.booking_rooms.first()
@@ -96,7 +97,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id', 'username', 'password', 'first_name', 'last_name', 'email', 'role', 'branch', 'branch_name', 'is_active']
+        fields = ['id', 'username', 'password', 'first_name', 'last_name', 'email', 'role', 'branch', 'branch_name', 'is_active', 'permissions_config']
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -141,7 +142,6 @@ class ActivityLogSerializer(serializers.ModelSerializer):
         model = ActivityLog
         fields = '__all__'
 
-# --- SERIALIZER MỚI CHO CẤU HÌNH ---
 class BranchSettingSerializer(serializers.ModelSerializer):
     class Meta:
         model = BranchSetting
