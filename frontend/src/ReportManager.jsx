@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-import { Card, Row, Col, Statistic, Select, Table, Tabs, DatePicker, Button, message, Empty, Spin } from 'antd';
+import { Card, Row, Col, Statistic, Select, Table, Tabs, DatePicker, Button, message, Empty, Spin, Tag } from 'antd';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarOutlined, ShoppingCartOutlined, BankOutlined, FileExcelOutlined, HomeOutlined } from '@ant-design/icons';
+import { DollarOutlined, ShoppingCartOutlined, BankOutlined, FileExcelOutlined, HomeOutlined, HistoryOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-// --- IMPORT THƯ VIỆN EXCEL ---
 import * as XLSX from 'xlsx';
 
 const { Option } = Select;
@@ -16,22 +15,25 @@ const ReportManager = () => {
     const [financeData, setFinanceData] = useState(null);
     const [goodsData, setGoodsData] = useState([]);
     const [roomData, setRoomData] = useState([]);
+    const [activityLogs, setActivityLogs] = useState([]); // <--- State mới cho Log
     const [loading, setLoading] = useState(false);
 
     const fetchReports = async () => {
         setLoading(true);
         try {
-            const [revRes, finRes, goodsRes, roomRes] = await Promise.all([
+            const [revRes, finRes, goodsRes, roomRes, actRes] = await Promise.all([
                 axios.get(`/api/reports/revenue/?filter=${filter}`),
                 axios.get(`/api/reports/finance/?filter=${filter}`),
                 axios.get(`/api/reports/goods/?filter=${filter}`),
-                axios.get(`/api/reports/room_performance/?filter=${filter}`)
+                axios.get(`/api/reports/room_performance/?filter=${filter}`),
+                axios.get('/api/activity-logs/') // <--- Gọi API lấy Log
             ]);
 
             if (revRes.data && typeof revRes.data === 'object') setRevenueData(revRes.data);
             if (finRes.data && typeof finRes.data === 'object') setFinanceData(finRes.data);
             if (Array.isArray(goodsRes.data)) setGoodsData(goodsRes.data);
             if (Array.isArray(roomRes.data)) setRoomData(roomRes.data);
+            if (Array.isArray(actRes.data)) setActivityLogs(actRes.data);
 
         } catch (error) {
             console.error("Lỗi tải báo cáo:", error);
@@ -45,31 +47,27 @@ const ReportManager = () => {
         fetchReports();
     }, [filter]);
 
-    // --- HÀM XUẤT EXCEL (LOGIC MỚI) ---
+    // --- HÀM XUẤT EXCEL ---
     const handleExportExcel = () => {
         if (!revenueData || !financeData) {
             message.warning("Dữ liệu chưa tải xong, vui lòng đợi...");
             return;
         }
 
-        // Tạo Workbook mới
         const workbook = XLSX.utils.book_new();
 
-        // 1. SHEET DOANH THU
+        // 1. DOANH THU
         const revSheetData = revenueData.chart_data.map(item => ({
             "Ngày": dayjs(item.date).format('DD/MM/YYYY'),
             "Doanh thu ngày": item.total
         }));
-        // Thêm dòng tổng kết
-        revSheetData.push({}); // Dòng trống
+        revSheetData.push({});
         revSheetData.push({ "Ngày": "TỔNG CỘNG", "Doanh thu ngày": revenueData.summary.total });
         revSheetData.push({ "Ngày": "Tiền phòng", "Doanh thu ngày": revenueData.summary.room_revenue });
         revSheetData.push({ "Ngày": "Tiền dịch vụ", "Doanh thu ngày": revenueData.summary.service_revenue });
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(revSheetData), "Doanh Thu");
 
-        const wsRev = XLSX.utils.json_to_sheet(revSheetData);
-        XLSX.utils.book_append_sheet(workbook, wsRev, "Doanh Thu");
-
-        // 2. SHEET TÀI CHÍNH (SỔ QUỸ)
+        // 2. TÀI CHÍNH
         const finSheetData = financeData.chart_data.map(item => ({
             "Ngày": dayjs(item.date).format('DD/MM/YYYY'),
             "Loại phiếu": item.flow_type === 'RECEIPT' ? 'Thu' : 'Chi',
@@ -79,44 +77,40 @@ const ReportManager = () => {
         finSheetData.push({ "Ngày": "Tổng Thu", "Số tiền": financeData.summary.receipt });
         finSheetData.push({ "Ngày": "Tổng Chi", "Số tiền": financeData.summary.payment });
         finSheetData.push({ "Ngày": "Lợi Nhuận", "Số tiền": financeData.summary.profit });
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(finSheetData), "Tài Chính");
 
-        const wsFin = XLSX.utils.json_to_sheet(finSheetData);
-        XLSX.utils.book_append_sheet(workbook, wsFin, "Tài Chính");
-
-        // 3. SHEET HÀNG HÓA
-        const goodsSheetData = goodsData.map(item => ({
+        // 3. HÀNG HÓA
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(goodsData.map(item => ({
             "Tên sản phẩm": item.product__name,
             "Số lượng bán": item.total_qty,
             "Doanh số": item.total_sales
-        }));
-        const wsGoods = XLSX.utils.json_to_sheet(goodsSheetData);
-        XLSX.utils.book_append_sheet(workbook, wsGoods, "Hàng Hóa");
+        }))), "Hàng Hóa");
 
-        // 4. SHEET HIỆU SUẤT PHÒNG
-        const roomSheetData = roomData.map(item => ({
+        // 4. HIỆU SUẤT PHÒNG
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(roomData.map(item => ({
             "Tên phòng": item.room__name,
             "Loại phòng": item.room__room_class__name,
             "Số lượt khách": item.booking_count,
             "Doanh thu mang lại": item.total_revenue
-        }));
-        const wsRoom = XLSX.utils.json_to_sheet(roomSheetData);
-        XLSX.utils.book_append_sheet(workbook, wsRoom, "Hiệu Suất Phòng");
+        }))), "Hiệu Suất Phòng");
 
-        // Xuất file
+        // 5. NHẬT KÝ HOẠT ĐỘNG (MỚI)
+        XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(activityLogs.map(log => ({
+            "Thời gian": dayjs(log.created_at).format('DD/MM/YYYY HH:mm'),
+            "Người thực hiện": log.user_name || 'Hệ thống',
+            "Hành động": log.action,
+            "Chi tiết": log.content
+        }))), "Nhật Ký Hoạt Động");
+
         const fileName = `Bao_cao_WeTech_${dayjs().format('DDMMYYYY_HHmm')}.xlsx`;
         XLSX.writeFile(workbook, fileName);
         message.success(`Đã xuất file: ${fileName}`);
     };
 
-    // --- TAB 1: DOANH THU ---
+    // --- CÁC TAB CON ---
     const RevenueTab = () => {
         if (!revenueData || !revenueData.chart_data || !revenueData.summary) return <Empty description="Chưa có dữ liệu doanh thu" />;
-        
-        const chartData = revenueData.chart_data.map(d => ({
-            date: dayjs(d.date).format('DD/MM'),
-            total: d.total
-        }));
-
+        const chartData = revenueData.chart_data.map(d => ({ date: dayjs(d.date).format('DD/MM'), total: d.total }));
         const pieData = [
             { name: 'Tiền phòng', value: revenueData.summary.room_revenue || 0 },
             { name: 'Dịch vụ', value: revenueData.summary.service_revenue || 0 }
@@ -165,7 +159,6 @@ const ReportManager = () => {
         );
     };
 
-    // --- TAB 2: TÀI CHÍNH ---
     const FinanceTab = () => {
         if (!financeData || !financeData.chart_data) return <Empty description="Chưa có dữ liệu tài chính" />;
         const chartMap = {};
@@ -203,7 +196,6 @@ const ReportManager = () => {
         );
     };
 
-    // --- TAB 3: HÀNG HÓA ---
     const GoodsTab = () => (
         <Card title="Top Hàng hóa / Dịch vụ bán chạy">
             <Table 
@@ -219,7 +211,6 @@ const ReportManager = () => {
         </Card>
     );
 
-    // --- TAB 4: HIỆU SUẤT PHÒNG ---
     const RoomTab = () => (
         <Card title="Hiệu quả kinh doanh theo Phòng">
             <Table 
@@ -231,6 +222,23 @@ const ReportManager = () => {
                     { title: 'Loại phòng', dataIndex: 'room__room_class__name', key: 'class' },
                     { title: 'Số lượt khách', dataIndex: 'booking_count', key: 'count', sorter: (a, b) => a.booking_count - b.booking_count },
                     { title: 'Tổng doanh thu', dataIndex: 'total_revenue', key: 'rev', render: val => val ? `${parseInt(val).toLocaleString()} đ` : '0 đ', sorter: (a, b) => a.total_revenue - b.total_revenue },
+                ]}
+            />
+        </Card>
+    );
+
+    // --- TAB HOẠT ĐỘNG (ACTIVITY LOG) ---
+    const ActivityTab = () => (
+        <Card title="Nhật ký hoạt động hệ thống (Gần đây)">
+            <Table 
+                dataSource={activityLogs} 
+                rowKey="id"
+                pagination={{ pageSize: 10 }}
+                columns={[
+                    { title: 'Thời gian', dataIndex: 'created_at', width: 180, render: val => dayjs(val).format('DD/MM/YYYY HH:mm') },
+                    { title: 'Người thực hiện', dataIndex: 'user_name', width: 150, render: text => <Tag color="blue">{text || 'Hệ thống'}</Tag> },
+                    { title: 'Hành động', dataIndex: 'action', width: 200, render: text => <b>{text}</b> },
+                    { title: 'Chi tiết', dataIndex: 'content' },
                 ]}
             />
         </Card>
@@ -249,7 +257,6 @@ const ReportManager = () => {
                         <Option value="last_7_days">7 ngày qua</Option>
                         <Option value="this_month">Tháng này</Option>
                     </Select>
-                    {/* NÚT XUẤT EXCEL ĐÃ CÓ LOGIC */}
                     <Button icon={<FileExcelOutlined />} onClick={handleExportExcel}>Xuất Excel</Button>
                 </div>
             </div>
@@ -262,6 +269,7 @@ const ReportManager = () => {
                     { label: <span><BankOutlined />Tài chính</span>, key: '2', children: <FinanceTab /> },
                     { label: <span><ShoppingCartOutlined />Hàng hóa</span>, key: '3', children: <GoodsTab /> },
                     { label: <span><HomeOutlined />Hiệu suất phòng</span>, key: '4', children: <RoomTab /> },
+                    { label: <span><HistoryOutlined />Hoạt động</span>, key: '5', children: <ActivityTab /> }, // <--- TAB MỚI
                 ]}
             />
         </div>

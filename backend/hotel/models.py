@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from django.utils import timezone  # <--- Đã thêm dòng này
+from django.utils import timezone
 from datetime import timedelta, datetime
 
 # --- 1. CORE SETTINGS ---
@@ -81,7 +81,6 @@ class Booking(models.Model):
     status = models.CharField(max_length=20, default='CHECKED_IN')
     total_amount = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     
-    # --- CÁC TRƯỜNG CHO ĐẶT PHÒNG ---
     check_in_expected = models.DateTimeField(null=True, blank=True)
     check_out_expected = models.DateTimeField(null=True, blank=True)
     note = models.TextField(blank=True, null=True)
@@ -141,7 +140,7 @@ class CashFlow(models.Model):
     def __str__(self):
         return f"{self.get_flow_type_display()} - {self.amount}"
 
-# --- 7. DEVICE & MAINTENANCE (MỚI) ---
+# --- 7. DEVICE & MAINTENANCE ---
 class Device(models.Model):
     STATUS_CHOICES = (
         ('GOOD', 'Hoạt động tốt'),
@@ -150,7 +149,6 @@ class Device(models.Model):
         ('LIQUIDATED', 'Đã thanh lý'),
     )
     branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='devices')
-    # Một thiết bị có thể nằm trong phòng HOẶC nằm ở khu vực chung (null=True)
     room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     area = models.ForeignKey(Area, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
     
@@ -159,7 +157,6 @@ class Device(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='GOOD')
     description = models.TextField(blank=True, null=True)
     
-    # Quản lý bảo trì
     is_maintenance_required = models.BooleanField(default=False, verbose_name="Cần bảo trì định kỳ")
     maintenance_interval_days = models.IntegerField(default=0, verbose_name="Chu kỳ (ngày)")
     last_maintenance_date = models.DateField(null=True, blank=True, verbose_name="Ngày bảo trì gần nhất")
@@ -168,7 +165,6 @@ class Device(models.Model):
 
     @property
     def next_maintenance_date(self):
-        """Tự động tính ngày bảo trì tiếp theo"""
         if self.is_maintenance_required and self.last_maintenance_date and self.maintenance_interval_days > 0:
             return self.last_maintenance_date + timedelta(days=self.maintenance_interval_days)
         return None
@@ -178,7 +174,7 @@ class Device(models.Model):
 
 class MaintenanceLog(models.Model):
     device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='logs')
-    date = models.DateField(default=timezone.now) # Đã có timezone import ở trên
+    date = models.DateField(default=timezone.now)
     cost = models.DecimalField(max_digits=12, decimal_places=0, default=0, verbose_name="Chi phí")
     description = models.TextField(verbose_name="Nội dung công việc")
     performer = models.CharField(max_length=255, verbose_name="Người thực hiện")
@@ -186,3 +182,43 @@ class MaintenanceLog(models.Model):
 
     def __str__(self):
         return f"{self.device.name} - {self.date}"
+
+# --- 8. ACTIVITY LOG ---
+class ActivityLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=50)
+    content = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user} - {self.action} - {self.created_at}"
+
+# --- 9. SETTINGS (MỚI: CẤU HÌNH HỆ THỐNG) ---
+class BranchSetting(models.Model):
+    SURCHARGE_METHOD_CHOICES = (
+        ('PERCENT', 'Theo phần trăm (%)'),
+        ('FIXED', 'Theo số tiền cố định (VNĐ)'),
+    )
+
+    branch = models.OneToOneField(Branch, on_delete=models.CASCADE, related_name='settings')
+    
+    # 1. Cấu hình giờ chuẩn
+    check_in_time = models.TimeField(default="14:00", verbose_name="Giờ nhận phòng chuẩn")
+    check_out_time = models.TimeField(default="12:00", verbose_name="Giờ trả phòng chuẩn")
+    
+    # 2. Cấu hình phụ thu quá giờ (Check-out muộn)
+    overtime_method = models.CharField(
+        max_length=10, 
+        choices=SURCHARGE_METHOD_CHOICES, 
+        default='PERCENT',
+        verbose_name="Cách tính phụ thu quá giờ"
+    )
+    # Lưu cả 2 giá trị để user chuyển đổi qua lại không bị mất số cũ
+    overtime_percent = models.IntegerField(default=10, verbose_name="Phụ thu (%/giờ)")
+    overtime_fixed = models.DecimalField(default=50000, max_digits=12, decimal_places=0, verbose_name="Phụ thu (VNĐ/giờ)")
+    
+    # Giới hạn: Sau bao nhiêu giờ thì tính 1 ngày
+    overtime_threshold_hours = models.IntegerField(default=4, verbose_name="Giới hạn quá giờ (giờ) tính 1 ngày")
+
+    def __str__(self):
+        return f"Cài đặt - {self.branch.name}"

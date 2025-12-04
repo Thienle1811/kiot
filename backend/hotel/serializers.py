@@ -2,7 +2,7 @@ from rest_framework import serializers
 from .models import (
     Branch, Area, RoomClass, Room, Booking, Product, ServiceOrder, 
     Customer, User, BookingRoom, CashFlow,
-    Device, MaintenanceLog # <--- Import model mới
+    Device, MaintenanceLog, ActivityLog, BranchSetting # <--- Import model BranchSetting
 )
 
 class BranchSerializer(serializers.ModelSerializer):
@@ -118,12 +118,9 @@ class CashFlowSerializer(serializers.ModelSerializer):
         model = CashFlow
         fields = ['id', 'branch', 'booking', 'booking_code', 'flow_type', 'category', 'amount', 'description', 'created_at']
 
-# --- SERIALIZERS MỚI CHO THIẾT BỊ ---
 class DeviceSerializer(serializers.ModelSerializer):
     room_name = serializers.CharField(source='room.name', read_only=True)
     area_name = serializers.CharField(source='area.name', read_only=True)
-    
-    # Trường này lấy từ @property trong Model (tự động tính ngày)
     next_maintenance_date = serializers.ReadOnlyField() 
 
     class Meta:
@@ -135,4 +132,17 @@ class MaintenanceLogSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = MaintenanceLog
+        fields = '__all__'
+
+class ActivityLogSerializer(serializers.ModelSerializer):
+    user_name = serializers.CharField(source='user.username', read_only=True)
+
+    class Meta:
+        model = ActivityLog
+        fields = '__all__'
+
+# --- SERIALIZER MỚI CHO CẤU HÌNH ---
+class BranchSettingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BranchSetting
         fields = '__all__'

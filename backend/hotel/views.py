@@ -10,13 +10,13 @@ from datetime import timedelta, datetime
 from .models import (
     Branch, Area, RoomClass, Room, Booking, Customer, BookingRoom, 
     Product, ServiceOrder, User, CashFlow,
-    Device, MaintenanceLog # <--- Import mới
+    Device, MaintenanceLog, ActivityLog, BranchSetting # <--- Import model BranchSetting
 )
 from .serializers import (
     BranchSerializer, AreaSerializer, RoomClassSerializer, RoomSerializer, 
     BookingSerializer, ProductSerializer, ServiceOrderSerializer, 
     CustomerSerializer, UserSerializer, CashFlowSerializer,
-    DeviceSerializer, MaintenanceLogSerializer # <--- Import mới
+    DeviceSerializer, MaintenanceLogSerializer, ActivityLogSerializer, BranchSettingSerializer # <--- Import BranchSettingSerializer
 )
 
 class BranchViewSet(viewsets.ModelViewSet):
@@ -34,6 +34,36 @@ class RoomClassViewSet(viewsets.ModelViewSet):
 class ProductViewSet(viewsets.ModelViewSet):
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
+
+    @action(detail=True, methods=['post'])
+    @transaction.atomic
+    def import_goods(self, request, pk=None):
+        product = self.get_object()
+        quantity = int(request.data.get('quantity', 0))
+        total_cost = int(request.data.get('total_cost', 0))
+        
+        if quantity <= 0:
+            return Response({'error': 'Số lượng nhập phải lớn hơn 0'}, status=status.HTTP_400_BAD_REQUEST)
+
+        product.stock_quantity += quantity
+        product.save()
+
+        if total_cost > 0:
+            CashFlow.objects.create(
+                branch=product.branch,
+                flow_type='PAYMENT',
+                category='Nhập hàng hóa',
+                amount=total_cost,
+                description=f"Nhập kho: {quantity} {product.name}"
+            )
+        
+        ActivityLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="NHẬP KHO",
+            content=f"Nhập {quantity} {product.name}. Tổng tiền: {total_cost:,} đ"
+        )
+        
+        return Response({'status': 'success', 'message': f'Đã nhập {quantity} {product.name}, tồn kho mới: {product.stock_quantity}'})
 
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.all().order_by('-created_at')
@@ -143,6 +173,13 @@ class RoomViewSet(viewsets.ModelViewSet):
         )
         room.status = 'OCCUPIED'
         room.save()
+
+        ActivityLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="CHECK_IN",
+            content=f"Nhận phòng {room.name} ({booking_type}). Khách: {main_customer.full_name}"
+        )
+
         return Response({'status': 'success', 'message': f'Đã nhận phòng ({booking_type})'})
 
     @action(detail=True, methods=['post'])
@@ -152,7 +189,12 @@ class RoomViewSet(viewsets.ModelViewSet):
         try:
             booking = BookingRoom.objects.filter(room=room, check_out_actual__isnull=True).latest('id').booking
             product = Product.objects.get(id=request.data.get('product_id'))
-            ServiceOrder.objects.create(booking=booking, product=product, quantity=int(request.data.get('quantity', 1)), unit_price_snapshot=product.selling_price)
+            qty = int(request.data.get('quantity', 1))
+            
+            product.stock_quantity -= qty
+            product.save()
+
+            ServiceOrder.objects.create(booking=booking, product=product, quantity=qty, unit_price_snapshot=product.selling_price)
             return Response({'status': 'success', 'message': 'Đã thêm dịch vụ'})
         except Exception as e: return Response({'error': str(e)}, status=400)
 
@@ -168,6 +210,7 @@ class RoomViewSet(viewsets.ModelViewSet):
             room_money = 0
             hours = 0 
             
+            # Tạm thời vẫn dùng logic cũ, sau này sẽ cập nhật dùng BranchSetting ở đây
             if booking_room.booking_type == 'HOURLY':
                 hours = max(1, math.ceil(duration.total_seconds() / 3600))
                 room_money = hours * booking_room.price_snapshot
@@ -195,6 +238,13 @@ class RoomViewSet(viewsets.ModelViewSet):
                 branch=room.branch, booking=booking, flow_type='RECEIPT',
                 category='Thu tiền phòng', amount=total_money, description=f"Thu tiền {booking_room.get_booking_type_display()} phòng {room.name}"
             )
+
+            ActivityLog.objects.create(
+                user=request.user if request.user.is_authenticated else None,
+                action="CHECK_OUT",
+                content=f"Trả phòng {room.name}. Khách: {booking.customer.full_name}. Tổng thu: {total_money:,} đ"
+            )
+
             return Response({
                 'status': 'success', 'message': 'Trả phòng thành công!',
                 'data': {
@@ -276,6 +326,12 @@ class BookingViewSet(viewsets.ModelViewSet):
             except Room.DoesNotExist:
                 return Response({'error': 'Phòng không tồn tại'}, status=400)
 
+        ActivityLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="ĐẶT PHÒNG",
+            content=f"Tạo đơn đặt trước {booking.code} cho khách {customer.full_name}"
+        )
+
         return Response({'status': 'success', 'message': 'Đặt phòng thành công!', 'booking_id': booking.id})
 
     @action(detail=True, methods=['post'])
@@ -336,6 +392,12 @@ class BookingViewSet(viewsets.ModelViewSet):
             br.room.status = 'OCCUPIED'
             br.room.save()
 
+        ActivityLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="NHẬN PHÒNG (ĐẶT TRƯỚC)",
+            content=f"Xác nhận nhận phòng cho đơn {booking.code}"
+        )
+
         return Response({
             'status': 'success', 
             'message': 'Đã nhận phòng thành công (Đã cập nhật thông tin khách & giá)',
@@ -347,6 +409,13 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = self.get_object()
         booking.status = 'CANCELLED'
         booking.save()
+
+        ActivityLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="HỦY ĐƠN",
+            content=f"Hủy đơn đặt phòng {booking.code} của khách {booking.customer.full_name}"
+        )
+
         return Response({'status': 'success', 'message': 'Đã hủy đơn đặt phòng'})
 
 class CashFlowViewSet(viewsets.ModelViewSet):
@@ -357,7 +426,6 @@ class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
 
-# --- NEW VIEWSETS: THIẾT BỊ ---
 class DeviceViewSet(viewsets.ModelViewSet):
     queryset = Device.objects.all()
     serializer_class = DeviceSerializer
@@ -365,11 +433,9 @@ class DeviceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def log_maintenance(self, request, pk=None):
-        """Ghi nhận bảo trì và tạo phiếu chi nếu có"""
         device = self.get_object()
         data = request.data
         
-        # 1. Tạo log
         MaintenanceLog.objects.create(
             device=device,
             cost=data.get('cost', 0),
@@ -377,12 +443,10 @@ class DeviceViewSet(viewsets.ModelViewSet):
             performer=data.get('performer', 'Nhân viên')
         )
         
-        # 2. Cập nhật thiết bị
         device.last_maintenance_date = timezone.now().date()
-        device.status = 'GOOD' # Mặc định sau khi bảo trì là tốt
+        device.status = 'GOOD'
         device.save()
         
-        # 3. Tạo phiếu chi tự động (Nếu có chi phí > 0)
         cost = int(data.get('cost', 0))
         if cost > 0:
             CashFlow.objects.create(
@@ -392,6 +456,12 @@ class DeviceViewSet(viewsets.ModelViewSet):
                 amount=cost,
                 description=f"Bảo trì: {device.name} ({data.get('description')})"
             )
+
+        ActivityLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="BẢO TRÌ",
+            content=f"Bảo trì thiết bị {device.name}. Nội dung: {data.get('description')}. Chi phí: {cost:,} đ"
+        )
 
         return Response({'status': 'success', 'message': 'Đã ghi nhận bảo trì thành công'})
 
@@ -405,6 +475,10 @@ class MaintenanceLogViewSet(viewsets.ModelViewSet):
         if device_id:
             queryset = queryset.filter(device_id=device_id)
         return queryset
+
+class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
+    queryset = ActivityLog.objects.all().order_by('-created_at')
+    serializer_class = ActivityLogSerializer
 
 class ReportViewSet(viewsets.ViewSet):
     def get_date_range(self, request):
@@ -446,3 +520,8 @@ class ReportViewSet(viewsets.ViewSet):
         start, end = self.get_date_range(request)
         stats = BookingRoom.objects.filter(check_in_actual__date__range=[start, end]).values('room__name', 'room__room_class__name').annotate(booking_count=Count('id'), total_revenue=Sum('booking__total_amount')).order_by('-total_revenue')
         return Response(list(stats))
+
+# --- VIEWSET MỚI: QUẢN LÝ CẤU HÌNH ---
+class BranchSettingViewSet(viewsets.ModelViewSet):
+    queryset = BranchSetting.objects.all()
+    serializer_class = BranchSettingSerializer

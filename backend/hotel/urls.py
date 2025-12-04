@@ -4,7 +4,8 @@ from .views import (
     BranchViewSet, AreaViewSet, RoomClassViewSet, RoomViewSet, 
     BookingViewSet, ProductViewSet, CustomerViewSet, UserViewSet, 
     CashFlowViewSet, ReportViewSet,
-    DeviceViewSet, MaintenanceLogViewSet # <--- Import viewset mới
+    DeviceViewSet, MaintenanceLogViewSet, ActivityLogViewSet, 
+    BranchSettingViewSet # <--- Import thêm BranchSettingViewSet
 )
 
 router = DefaultRouter()
@@ -19,9 +20,15 @@ router.register(r'users', UserViewSet)
 router.register(r'cash-flows', CashFlowViewSet)
 router.register(r'reports', ReportViewSet, basename='reports')
 
-# --- API MỚI CHO THIẾT BỊ ---
+# --- API CHO THIẾT BỊ ---
 router.register(r'devices', DeviceViewSet)
 router.register(r'maintenance-logs', MaintenanceLogViewSet)
+
+# --- API CHO NHẬT KÝ HOẠT ĐỘNG ---
+router.register(r'activity-logs', ActivityLogViewSet)
+
+# --- API CHO CÀI ĐẶT CẤU HÌNH (MỚI) ---
+router.register(r'settings', BranchSettingViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

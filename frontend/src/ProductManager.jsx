@@ -1,26 +1,38 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
-// --- ĐÃ BỔ SUNG Row, Col VÀO DÒNG DƯỚI ĐÂY ---
-import { Table, Button, Modal, Form, Input, InputNumber, message, Space, Popconfirm, Card, Row, Col } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ShopOutlined } from '@ant-design/icons';
+import { 
+    Table, Button, Modal, Form, Input, InputNumber, message, 
+    Space, Popconfirm, Card, Row, Col, Tag 
+} from 'antd';
+import { 
+    PlusOutlined, EditOutlined, DeleteOutlined, ShopOutlined, 
+    DownloadOutlined, ImportOutlined 
+} from '@ant-design/icons';
 
 const ProductManager = () => {
     const [products, setProducts] = useState([]);
     const [loading, setLoading] = useState(false);
+    
+    // Modal Thêm/Sửa thông tin sản phẩm
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [editingProduct, setEditingProduct] = useState(null); 
+    const [editingProduct, setEditingProduct] = useState(null);
     const [form] = Form.useForm();
+
+    // Modal Nhập hàng (Import)
+    const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+    const [importingProduct, setImportingProduct] = useState(null);
+    const [importForm] = Form.useForm();
     
     const [defaultBranchId, setDefaultBranchId] = useState(null);
 
     const fetchData = async () => {
         setLoading(true);
         try {
-            const res = await axios.get('http://127.0.0.1:8000/api/products/');
+            const res = await axios.get('/api/products/');
             setProducts(res.data);
 
             if (!defaultBranchId) {
-                const branchRes = await axios.get('http://127.0.0.1:8000/api/branches/');
+                const branchRes = await axios.get('/api/branches/');
                 if (branchRes.data.length > 0) {
                     setDefaultBranchId(branchRes.data[0].id);
                 }
@@ -36,6 +48,7 @@ const ProductManager = () => {
         fetchData();
     }, []);
 
+    // --- XỬ LÝ THÊM / SỬA SẢN PHẨM ---
     const handleOpenModal = (product = null) => {
         setEditingProduct(product);
         if (product) {
@@ -56,10 +69,10 @@ const ProductManager = () => {
             const data = { ...values, branch: defaultBranchId };
             
             if (editingProduct) {
-                await axios.put(`http://127.0.0.1:8000/api/products/${editingProduct.id}/`, data);
+                await axios.put(`/api/products/${editingProduct.id}/`, data);
                 message.success("Cập nhật thành công!");
             } else {
-                await axios.post('http://127.0.0.1:8000/api/products/', data);
+                await axios.post('/api/products/', data);
                 message.success("Thêm mới thành công!");
             }
             setIsModalOpen(false);
@@ -71,11 +84,30 @@ const ProductManager = () => {
 
     const handleDelete = async (id) => {
         try {
-            await axios.delete(`http://127.0.0.1:8000/api/products/${id}/`);
+            await axios.delete(`/api/products/${id}/`);
             message.success("Đã xóa sản phẩm");
             fetchData();
         } catch (error) {
             message.error("Không thể xóa (có thể do món này đã có trong hóa đơn cũ)");
+        }
+    };
+
+    // --- XỬ LÝ NHẬP HÀNG (IMPORT) ---
+    const handleOpenImport = (product) => {
+        setImportingProduct(product);
+        importForm.resetFields();
+        importForm.setFieldsValue({ quantity: 10, total_cost: 0 }); // Mặc định
+        setIsImportModalOpen(true);
+    };
+
+    const handleImport = async (values) => {
+        try {
+            await axios.post(`/api/products/${importingProduct.id}/import_goods/`, values);
+            message.success(`Đã nhập kho cho ${importingProduct.name}`);
+            setIsImportModalOpen(false);
+            fetchData(); // Load lại để thấy tồn kho tăng
+        } catch (error) {
+            message.error("Lỗi khi nhập hàng");
         }
     };
 
@@ -96,13 +128,26 @@ const ProductManager = () => {
             title: 'Tồn kho',
             dataIndex: 'stock_quantity',
             key: 'stock_quantity',
-            render: (val) => <span style={{color: val < 10 ? 'red' : 'green'}}>{val}</span>
+            render: (val) => {
+                let color = 'green';
+                if (val === 0) color = 'orange';
+                if (val < 0) color = 'red';
+                return <Tag color={color} style={{fontWeight: 'bold', fontSize: 14}}>{val}</Tag>;
+            }
         },
         {
             title: 'Hành động',
             key: 'action',
             render: (_, record) => (
                 <Space>
+                    <Button 
+                        icon={<DownloadOutlined />} 
+                        onClick={() => handleOpenImport(record)} 
+                        type="primary" ghost
+                        title="Nhập hàng thêm"
+                    >
+                        Nhập
+                    </Button>
                     <Button icon={<EditOutlined />} onClick={() => handleOpenModal(record)} />
                     <Popconfirm title="Bạn chắc chắn muốn xóa?" onConfirm={() => handleDelete(record.id)}>
                         <Button icon={<DeleteOutlined />} danger />
@@ -115,7 +160,7 @@ const ProductManager = () => {
     return (
         <Card title={<span><ShopOutlined /> Quản lý Hàng hóa & Kho</span>} extra={
             <Button type="primary" icon={<PlusOutlined />} onClick={() => handleOpenModal(null)}>
-                Thêm hàng hóa
+                Thêm hàng hóa mới
             </Button>
         }>
             <Table 
@@ -123,9 +168,10 @@ const ProductManager = () => {
                 columns={columns} 
                 rowKey="id" 
                 loading={loading}
-                pagination={{ pageSize: 5 }} 
+                pagination={{ pageSize: 10 }} 
             />
 
+            {/* MODAL THÊM / SỬA THÔNG TIN */}
             <Modal
                 title={editingProduct ? "Cập nhật sản phẩm" : "Thêm sản phẩm mới"}
                 open={isModalOpen}
@@ -137,15 +183,18 @@ const ProductManager = () => {
                         <Input placeholder="Ví dụ: Nước suối, Giặt là..." />
                     </Form.Item>
                     
-                    {/* KHU VỰC GÂY LỖI CŨ (Giờ đã có Row, Col import ở trên) */}
                     <Row gutter={16}>
                         <Col span={12}>
                             <Form.Item name="selling_price" label="Giá bán (VNĐ)" rules={[{ required: true }]}>
-                                <InputNumber style={{ width: '100%' }} formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} parser={value => value.replace(/\$\s?|(,*)/g, '')}/>
+                                <InputNumber 
+                                    style={{ width: '100%' }} 
+                                    formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} 
+                                    parser={value => value.replace(/\$\s?|(,*)/g, '')}
+                                />
                             </Form.Item>
                         </Col>
                         <Col span={12}>
-                            <Form.Item name="stock_quantity" label="Số lượng tồn kho" initialValue={100}>
+                            <Form.Item name="stock_quantity" label="Tồn kho ban đầu" initialValue={0}>
                                 <InputNumber style={{ width: '100%' }} />
                             </Form.Item>
                         </Col>
@@ -154,6 +203,42 @@ const ProductManager = () => {
                     <div style={{ textAlign: 'right', marginTop: 10 }}>
                         <Button onClick={() => setIsModalOpen(false)} style={{ marginRight: 10 }}>Hủy</Button>
                         <Button type="primary" htmlType="submit">Lưu dữ liệu</Button>
+                    </div>
+                </Form>
+            </Modal>
+
+            {/* MODAL NHẬP HÀNG (IMPORT) */}
+            <Modal
+                title={<span><ImportOutlined /> Nhập kho: <b>{importingProduct?.name}</b></span>}
+                open={isImportModalOpen}
+                onCancel={() => setIsImportModalOpen(false)}
+                footer={null}
+            >
+                <Form form={importForm} layout="vertical" onFinish={handleImport}>
+                    <p style={{fontStyle: 'italic', color: '#666'}}>
+                        Nhập số lượng hàng mới về. Hệ thống sẽ cộng vào tồn kho hiện tại và tự động tạo phiếu chi tiền nhập hàng.
+                    </p>
+                    <Row gutter={16}>
+                        <Col span={12}>
+                            <Form.Item name="quantity" label="Số lượng nhập" rules={[{ required: true }]}>
+                                <InputNumber style={{ width: '100%' }} min={1} />
+                            </Form.Item>
+                        </Col>
+                        <Col span={12}>
+                            <Form.Item name="total_cost" label="Tổng tiền nhập hàng (VNĐ)" initialValue={0}>
+                                <InputNumber 
+                                    style={{ width: '100%' }} 
+                                    min={0}
+                                    formatter={value => `${value}`.replace(/\B(?=(\d{3})+(?!\d))/g, ',')} 
+                                    parser={value => value.replace(/\$\s?|(,*)/g, '')}
+                                />
+                            </Form.Item>
+                        </Col>
+                    </Row>
+
+                    <div style={{ textAlign: 'right', marginTop: 10 }}>
+                        <Button onClick={() => setIsImportModalOpen(false)} style={{ marginRight: 10 }}>Hủy</Button>
+                        <Button type="primary" htmlType="submit" icon={<DownloadOutlined />}>Xác nhận Nhập</Button>
                     </div>
                 </Form>
             </Modal>

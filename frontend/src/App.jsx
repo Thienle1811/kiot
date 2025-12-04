@@ -6,7 +6,7 @@ import {
   PieChartOutlined, ArrowUpOutlined, LogoutOutlined, PlusOutlined, CoffeeOutlined, 
   PrinterOutlined, ShopOutlined, SettingOutlined, GoldOutlined, UsergroupAddOutlined, 
   MinusCircleOutlined, SearchOutlined, EyeOutlined, TeamOutlined, WalletOutlined, 
-  CalendarOutlined, FileTextOutlined, FileExcelOutlined, ToolOutlined // <--- Import thêm icon ToolOutlined
+  CalendarOutlined, FileTextOutlined, FileExcelOutlined, ToolOutlined 
 } from '@ant-design/icons';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
@@ -21,7 +21,8 @@ import EmployeeManager from './EmployeeManager';
 import CashFlowManager from './CashFlowManager';
 import ReservationManager from './ReservationManager';
 import ReportManager from './ReportManager';
-import DeviceManager from './DeviceManager'; // <--- Import Component mới
+import DeviceManager from './DeviceManager';
+import SettingManager from './SettingManager'; // <--- Import Component mới
 
 const { Title, Text } = Typography;
 const { Header, Content } = Layout;
@@ -201,7 +202,7 @@ function App() {
             { label: 'Sơ đồ phòng', key: '2', icon: <AppstoreOutlined /> },
             { label: 'Quản lý Phòng', key: '5', icon: <SettingOutlined /> },
             { label: 'Hạng phòng & Giá', key: '6', icon: <GoldOutlined /> },
-            { label: 'Thiết bị & Tài sản', key: '12', icon: <ToolOutlined /> }, // <--- THÊM MENU THIẾT BỊ
+            { label: 'Thiết bị & Tài sản', key: '12', icon: <ToolOutlined /> },
     ]},
     { label: 'Lịch sử GD', key: '3', icon: <HistoryOutlined /> },
     { label: 'Sổ quỹ', key: '9', icon: <WalletOutlined /> },
@@ -210,6 +211,7 @@ function App() {
     { label: 'Hàng hóa', key: '4', icon: <ShopOutlined /> },
     { label: 'Khách hàng', key: '7', icon: <UsergroupAddOutlined /> },
     { label: 'Nhân viên', key: '8', icon: <TeamOutlined /> },
+    { label: 'Cài đặt', key: '13', icon: <SettingOutlined /> }, // <--- MENU MỚI
   ];
 
   const renderContent = () => {
@@ -241,7 +243,8 @@ function App() {
           case '9': return <CashFlowManager />;
           case '10': return <ReservationManager />;
           case '11': return <ReportManager />;
-          case '12': return <DeviceManager />; // <--- RENDER COMPONENT THIẾT BỊ
+          case '12': return <DeviceManager />;
+          case '13': return <SettingManager />; // <--- COMPONENT MỚI
           default: return null;
       }
   };
