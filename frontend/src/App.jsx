@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Card, Tag, Typography, Row, Col, Badge, Spin, Modal, Button, Form, Input, DatePicker, message, Descriptions, Table, Tabs, Statistic, Layout, Select, InputNumber, Divider, Menu, Radio } from 'antd';
-import { HomeOutlined, UserOutlined, CheckCircleOutlined, HistoryOutlined, AppstoreOutlined, PieChartOutlined, ArrowUpOutlined, LogoutOutlined, PlusOutlined, CoffeeOutlined, PrinterOutlined, ShopOutlined, SettingOutlined, GoldOutlined, UsergroupAddOutlined, MinusCircleOutlined, SearchOutlined, EyeOutlined, TeamOutlined, WalletOutlined, CalendarOutlined, FileTextOutlined, FileExcelOutlined } from '@ant-design/icons';
+import { 
+  HomeOutlined, UserOutlined, CheckCircleOutlined, HistoryOutlined, AppstoreOutlined, 
+  PieChartOutlined, ArrowUpOutlined, LogoutOutlined, PlusOutlined, CoffeeOutlined, 
+  PrinterOutlined, ShopOutlined, SettingOutlined, GoldOutlined, UsergroupAddOutlined, 
+  MinusCircleOutlined, SearchOutlined, EyeOutlined, TeamOutlined, WalletOutlined, 
+  CalendarOutlined, FileTextOutlined, FileExcelOutlined, ToolOutlined // <--- Import thêm icon ToolOutlined
+} from '@ant-design/icons';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import dayjs from 'dayjs';
 import * as XLSX from 'xlsx';
@@ -15,6 +21,7 @@ import EmployeeManager from './EmployeeManager';
 import CashFlowManager from './CashFlowManager';
 import ReservationManager from './ReservationManager';
 import ReportManager from './ReportManager';
+import DeviceManager from './DeviceManager'; // <--- Import Component mới
 
 const { Title, Text } = Typography;
 const { Header, Content } = Layout;
@@ -97,7 +104,7 @@ function App() {
             identity_type: 'CCCD', 
             accompanying_people: [], 
             check_in_time: dayjs(),
-            booking_type: 'DAILY' // Sửa mặc định thành DAILY
+            booking_type: 'DAILY' 
         });
     }
     setIsModalOpen(true);
@@ -113,7 +120,7 @@ function App() {
     const totalMoney = data.total_money || data.total_amount;
     const roomName = data.room_name;
     const code = data.code;
-    const bookingType = data.booking_type || ''; // Lấy loại hình
+    const bookingType = data.booking_type || ''; 
     let serviceMoney = data.service_money;
     if (serviceMoney === undefined && data.service_orders) {
         serviceMoney = data.service_orders.reduce((sum, item) => sum + parseInt(item.total_price), 0);
@@ -194,6 +201,7 @@ function App() {
             { label: 'Sơ đồ phòng', key: '2', icon: <AppstoreOutlined /> },
             { label: 'Quản lý Phòng', key: '5', icon: <SettingOutlined /> },
             { label: 'Hạng phòng & Giá', key: '6', icon: <GoldOutlined /> },
+            { label: 'Thiết bị & Tài sản', key: '12', icon: <ToolOutlined /> }, // <--- THÊM MENU THIẾT BỊ
     ]},
     { label: 'Lịch sử GD', key: '3', icon: <HistoryOutlined /> },
     { label: 'Sổ quỹ', key: '9', icon: <WalletOutlined /> },
@@ -233,6 +241,7 @@ function App() {
           case '9': return <CashFlowManager />;
           case '10': return <ReservationManager />;
           case '11': return <ReportManager />;
+          case '12': return <DeviceManager />; // <--- RENDER COMPONENT THIẾT BỊ
           default: return null;
       }
   };
@@ -252,12 +261,12 @@ function App() {
         
         {renderContent()}
 
+        {/* Modal Xử lý phòng (Giữ nguyên) */}
         <Modal title={selectedRoom ? `Xử lý: ${selectedRoom.name}` : "Thông tin"} open={isModalOpen} onOk={handleOk} onCancel={() => setIsModalOpen(false)} width={selectedRoom?.status === 'AVAILABLE' ? 900 : 600} okText={selectedRoom?.status === 'AVAILABLE' ? "Nhận phòng" : "Thanh toán & Trả"} okButtonProps={{ danger: selectedRoom?.status !== 'AVAILABLE', size: 'large' }} cancelText="Đóng">
             {selectedRoom && (
                 <Form form={checkInForm} layout="vertical" style={{ marginTop: 20 }}>
                     {selectedRoom.status === 'AVAILABLE' && (
                         <>
-                            {/* DROPDOWN CHỌN HÌNH THỨC ĐẶT PHÒNG MỚI */}
                             <Row gutter={16} style={{marginBottom: 20, background: '#e6f7ff', padding: 10, borderRadius: 5}}>
                                 <Col span={24}>
                                     <Form.Item name="booking_type" label="Hình thức đặt phòng" initialValue="DAILY" style={{marginBottom: 0}}>

@@ -1,5 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
+from django.utils import timezone  # <--- Đã thêm dòng này
+from datetime import timedelta, datetime
 
 # --- 1. CORE SETTINGS ---
 class Branch(models.Model):
@@ -79,16 +81,14 @@ class Booking(models.Model):
     status = models.CharField(max_length=20, default='CHECKED_IN')
     total_amount = models.DecimalField(max_digits=12, decimal_places=0, default=0)
     
-    # --- CÁC TRƯỜNG MỚI CHO ĐẶT PHÒNG ---
+    # --- CÁC TRƯỜNG CHO ĐẶT PHÒNG ---
     check_in_expected = models.DateTimeField(null=True, blank=True)
     check_out_expected = models.DateTimeField(null=True, blank=True)
     note = models.TextField(blank=True, null=True)
-    # -------------------------------------
     
     created_at = models.DateTimeField(auto_now_add=True)
 
 class BookingRoom(models.Model):
-    # Định nghĩa các loại hình đặt phòng
     BOOKING_TYPE_CHOICES = (
         ('HOURLY', 'Theo giờ'),
         ('DAILY', 'Theo ngày'),
@@ -97,14 +97,10 @@ class BookingRoom(models.Model):
     
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='booking_rooms')
     room = models.ForeignKey(Room, on_delete=models.PROTECT)
-    
-    # --- THÊM MỚI: Mặc định là DAILY ---
     booking_type = models.CharField(max_length=20, choices=BOOKING_TYPE_CHOICES, default='DAILY')
     
     check_in_actual = models.DateTimeField(null=True, blank=True)
     check_out_actual = models.DateTimeField(null=True, blank=True)
-    
-    # --- SỬA TÊN: Đổi price_hourly_snapshot -> price_snapshot ---
     price_snapshot = models.DecimalField(max_digits=12, decimal_places=0, default=0)
 
     def __str__(self):
@@ -144,3 +140,49 @@ class CashFlow(models.Model):
 
     def __str__(self):
         return f"{self.get_flow_type_display()} - {self.amount}"
+
+# --- 7. DEVICE & MAINTENANCE (MỚI) ---
+class Device(models.Model):
+    STATUS_CHOICES = (
+        ('GOOD', 'Hoạt động tốt'),
+        ('BROKEN', 'Hỏng/Cần sửa'),
+        ('MAINTENANCE', 'Đang bảo trì'),
+        ('LIQUIDATED', 'Đã thanh lý'),
+    )
+    branch = models.ForeignKey(Branch, on_delete=models.CASCADE, related_name='devices')
+    # Một thiết bị có thể nằm trong phòng HOẶC nằm ở khu vực chung (null=True)
+    room = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
+    area = models.ForeignKey(Area, on_delete=models.SET_NULL, null=True, blank=True, related_name='devices')
+    
+    name = models.CharField(max_length=255, verbose_name="Tên thiết bị")
+    code = models.CharField(max_length=50, null=True, blank=True, verbose_name="Mã tài sản")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='GOOD')
+    description = models.TextField(blank=True, null=True)
+    
+    # Quản lý bảo trì
+    is_maintenance_required = models.BooleanField(default=False, verbose_name="Cần bảo trì định kỳ")
+    maintenance_interval_days = models.IntegerField(default=0, verbose_name="Chu kỳ (ngày)")
+    last_maintenance_date = models.DateField(null=True, blank=True, verbose_name="Ngày bảo trì gần nhất")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    @property
+    def next_maintenance_date(self):
+        """Tự động tính ngày bảo trì tiếp theo"""
+        if self.is_maintenance_required and self.last_maintenance_date and self.maintenance_interval_days > 0:
+            return self.last_maintenance_date + timedelta(days=self.maintenance_interval_days)
+        return None
+
+    def __str__(self):
+        return self.name
+
+class MaintenanceLog(models.Model):
+    device = models.ForeignKey(Device, on_delete=models.CASCADE, related_name='logs')
+    date = models.DateField(default=timezone.now) # Đã có timezone import ở trên
+    cost = models.DecimalField(max_digits=12, decimal_places=0, default=0, verbose_name="Chi phí")
+    description = models.TextField(verbose_name="Nội dung công việc")
+    performer = models.CharField(max_length=255, verbose_name="Người thực hiện")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.device.name} - {self.date}"

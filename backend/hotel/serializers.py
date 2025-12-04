@@ -1,5 +1,9 @@
 from rest_framework import serializers
-from .models import Branch, Area, RoomClass, Room, Booking, Product, ServiceOrder, Customer, User, BookingRoom, CashFlow
+from .models import (
+    Branch, Area, RoomClass, Room, Booking, Product, ServiceOrder, 
+    Customer, User, BookingRoom, CashFlow,
+    Device, MaintenanceLog # <--- Import model mới
+)
 
 class BranchSerializer(serializers.ModelSerializer):
     class Meta:
@@ -19,10 +23,7 @@ class RoomClassSerializer(serializers.ModelSerializer):
 class RoomSerializer(serializers.ModelSerializer):
     room_class_name = serializers.CharField(source='room_class.name', read_only=True)
     area_name = serializers.CharField(source='area.name', read_only=True)
-    # Giá mặc định (để hiển thị khi phòng trống)
     price_hourly = serializers.DecimalField(source='room_class.base_price_hourly', max_digits=12, decimal_places=0, read_only=True)
-    
-    # [THÊM MỚI] Thông tin booking hiện tại (để hiển thị đúng giá khi đang có khách)
     current_booking = serializers.SerializerMethodField()
 
     class Meta:
@@ -30,15 +31,13 @@ class RoomSerializer(serializers.ModelSerializer):
         fields = ['id', 'name', 'status', 'branch', 'area', 'area_name', 'room_class', 'room_class_name', 'price_hourly', 'current_booking']
 
     def get_current_booking(self, obj):
-        # Chỉ lấy dữ liệu nếu phòng đang có khách
         if obj.status == 'OCCUPIED':
             try:
-                # Lấy booking_room mới nhất chưa check-out của phòng này
                 booking_room = obj.bookingroom_set.filter(check_out_actual__isnull=True).latest('id')
                 return {
-                    'booking_type': booking_room.booking_type,               # VD: 'DAILY'
-                    'booking_type_display': booking_room.get_booking_type_display(), # VD: 'Theo ngày'
-                    'price': booking_room.price_snapshot,                    # Giá thực tế: 250000
+                    'booking_type': booking_room.booking_type,
+                    'booking_type_display': booking_room.get_booking_type_display(),
+                    'price': booking_room.price_snapshot,
                     'check_in': booking_room.check_in_actual
                 }
             except Exception:
@@ -118,3 +117,22 @@ class CashFlowSerializer(serializers.ModelSerializer):
     class Meta:
         model = CashFlow
         fields = ['id', 'branch', 'booking', 'booking_code', 'flow_type', 'category', 'amount', 'description', 'created_at']
+
+# --- SERIALIZERS MỚI CHO THIẾT BỊ ---
+class DeviceSerializer(serializers.ModelSerializer):
+    room_name = serializers.CharField(source='room.name', read_only=True)
+    area_name = serializers.CharField(source='area.name', read_only=True)
+    
+    # Trường này lấy từ @property trong Model (tự động tính ngày)
+    next_maintenance_date = serializers.ReadOnlyField() 
+
+    class Meta:
+        model = Device
+        fields = '__all__'
+
+class MaintenanceLogSerializer(serializers.ModelSerializer):
+    device_name = serializers.CharField(source='device.name', read_only=True)
+    
+    class Meta:
+        model = MaintenanceLog
+        fields = '__all__'

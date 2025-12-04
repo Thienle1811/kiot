@@ -7,10 +7,16 @@ from django.db.models import Sum, Count, F
 from django.db.models.functions import TruncDate
 import math
 from datetime import timedelta, datetime
-from .models import Branch, Area, RoomClass, Room, Booking, Customer, BookingRoom, Product, ServiceOrder, User, CashFlow
+from .models import (
+    Branch, Area, RoomClass, Room, Booking, Customer, BookingRoom, 
+    Product, ServiceOrder, User, CashFlow,
+    Device, MaintenanceLog # <--- Import mới
+)
 from .serializers import (
     BranchSerializer, AreaSerializer, RoomClassSerializer, RoomSerializer, 
-    BookingSerializer, ProductSerializer, ServiceOrderSerializer, CustomerSerializer, UserSerializer, CashFlowSerializer
+    BookingSerializer, ProductSerializer, ServiceOrderSerializer, 
+    CustomerSerializer, UserSerializer, CashFlowSerializer,
+    DeviceSerializer, MaintenanceLogSerializer # <--- Import mới
 )
 
 class BranchViewSet(viewsets.ModelViewSet):
@@ -92,8 +98,6 @@ class RoomViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Phòng này đang có khách!'}, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data
-        
-        # [CẬP NHẬT] Mặc định là DAILY nếu không gửi booking_type lên
         booking_type = data.get('booking_type', 'DAILY')
 
         def create_or_update_customer(cust_data, rep=None):
@@ -122,14 +126,12 @@ class RoomViewSet(viewsets.ModelViewSet):
             branch=room.branch, customer=main_customer, status='CHECKED_IN', code=booking_code, total_amount=0
         )
         
-        # [CẬP NHẬT] Xác định giá: Ưu tiên DAILY làm mặc định
         price_snapshot = 0
         if booking_type == 'HOURLY':
             price_snapshot = room.room_class.base_price_hourly
         elif booking_type == 'OVERNIGHT':
             price_snapshot = room.room_class.base_price_overnight
         else:
-            # Mặc định rơi vào DAILY
             booking_type = 'DAILY'
             price_snapshot = room.room_class.base_price_daily
 
@@ -163,7 +165,6 @@ class RoomViewSet(viewsets.ModelViewSet):
             check_out_time = timezone.now()
             duration = check_out_time - booking_room.check_in_actual
             
-            # TÍNH TIỀN DỰA TRÊN LOẠI HÌNH
             room_money = 0
             hours = 0 
             
@@ -171,12 +172,9 @@ class RoomViewSet(viewsets.ModelViewSet):
                 hours = max(1, math.ceil(duration.total_seconds() / 3600))
                 room_money = hours * booking_room.price_snapshot
             elif booking_room.booking_type == 'OVERNIGHT':
-                # Qua đêm tính giá trọn gói
                 hours = math.ceil(duration.total_seconds() / 3600)
                 room_money = booking_room.price_snapshot 
             else:
-                # [CẬP NHẬT] DAILY (hoặc các trường hợp còn lại)
-                # Tính theo ngày (làm tròn lên, tối thiểu 1 ngày)
                 days = max(1, math.ceil(duration.total_seconds() / 86400))
                 hours = days * 24 
                 room_money = days * booking_room.price_snapshot
@@ -231,7 +229,6 @@ class BookingViewSet(viewsets.ModelViewSet):
             'total_rooms': Room.objects.count()
         })
 
-    # --- 1. TẠO ĐẶT PHÒNG (RESERVE) ---
     @action(detail=False, methods=['post'])
     @transaction.atomic
     def reserve(self, request):
@@ -240,7 +237,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         if not customer_data.get('full_name'): 
             return Response({'error': 'Thiếu tên khách'}, status=400)
         
-        # Chỉ cần Tên & SĐT để giữ chỗ
         customer, _ = Customer.objects.get_or_create(
             full_name=customer_data.get('full_name'), 
             defaults={'phone': customer_data.get('phone')}
@@ -260,8 +256,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         if data.get('room_id'):
             try:
                 room = Room.objects.get(id=data.get('room_id'))
-                
-                # [CẬP NHẬT] Mặc định HOURLY -> DAILY
                 booking_type = data.get('booking_type', 'DAILY')
                 
                 price_snapshot = 0
@@ -270,7 +264,6 @@ class BookingViewSet(viewsets.ModelViewSet):
                 elif booking_type == 'OVERNIGHT':
                     price_snapshot = room.room_class.base_price_overnight
                 else:
-                    # Mặc định lấy giá ngày
                     price_snapshot = room.room_class.base_price_daily
                     booking_type = 'DAILY'
 
@@ -285,7 +278,6 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response({'status': 'success', 'message': 'Đặt phòng thành công!', 'booking_id': booking.id})
 
-    # --- 2. XÁC NHẬN NHẬN PHÒNG (CONFIRM CHECK-IN) ---
     @action(detail=True, methods=['post'])
     @transaction.atomic
     def confirm_checkin(self, request, pk=None):
@@ -295,7 +287,6 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         data = request.data
         
-        # A. CẬP NHẬT THÔNG TIN KHÁCH
         customer_data = data.get('customer', {})
         if customer_data:
             cust_obj = booking.customer
@@ -323,18 +314,15 @@ class BookingViewSet(viewsets.ModelViewSet):
                     else:
                         Customer.objects.create(**defaults)
 
-        # B. CẬP NHẬT TRẠNG THÁI BOOKING
         booking.status = 'CHECKED_IN'
         if data.get('note'): booking.note = data.get('note')
         booking.save()
 
-        # C. CẬP NHẬT LOẠI PHÒNG & TÍNH LẠI GIÁ
         new_booking_type = data.get('booking_type') 
         
         for br in booking.booking_rooms.all():
             br.check_in_actual = timezone.now()
             
-            # Nếu có thay đổi loại đặt phòng -> Cập nhật type & Tính lại giá snapshot
             if new_booking_type:
                 br.booking_type = new_booking_type
                 if new_booking_type == 'HOURLY':
@@ -368,6 +356,55 @@ class CashFlowViewSet(viewsets.ModelViewSet):
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
+
+# --- NEW VIEWSETS: THIẾT BỊ ---
+class DeviceViewSet(viewsets.ModelViewSet):
+    queryset = Device.objects.all()
+    serializer_class = DeviceSerializer
+
+    @action(detail=True, methods=['post'])
+    @transaction.atomic
+    def log_maintenance(self, request, pk=None):
+        """Ghi nhận bảo trì và tạo phiếu chi nếu có"""
+        device = self.get_object()
+        data = request.data
+        
+        # 1. Tạo log
+        MaintenanceLog.objects.create(
+            device=device,
+            cost=data.get('cost', 0),
+            description=data.get('description', ''),
+            performer=data.get('performer', 'Nhân viên')
+        )
+        
+        # 2. Cập nhật thiết bị
+        device.last_maintenance_date = timezone.now().date()
+        device.status = 'GOOD' # Mặc định sau khi bảo trì là tốt
+        device.save()
+        
+        # 3. Tạo phiếu chi tự động (Nếu có chi phí > 0)
+        cost = int(data.get('cost', 0))
+        if cost > 0:
+            CashFlow.objects.create(
+                branch=device.branch,
+                flow_type='PAYMENT',
+                category='Chi phí bảo trì',
+                amount=cost,
+                description=f"Bảo trì: {device.name} ({data.get('description')})"
+            )
+
+        return Response({'status': 'success', 'message': 'Đã ghi nhận bảo trì thành công'})
+
+class MaintenanceLogViewSet(viewsets.ModelViewSet):
+    queryset = MaintenanceLog.objects.all().order_by('-created_at')
+    serializer_class = MaintenanceLogSerializer
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        device_id = self.request.query_params.get('device', None)
+        if device_id:
+            queryset = queryset.filter(device_id=device_id)
+        return queryset
 
 class ReportViewSet(viewsets.ViewSet):
     def get_date_range(self, request):

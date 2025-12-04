@@ -3,7 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     BranchViewSet, AreaViewSet, RoomClassViewSet, RoomViewSet, 
     BookingViewSet, ProductViewSet, CustomerViewSet, UserViewSet, 
-    CashFlowViewSet, ReportViewSet # <--- Import ReportViewSet
+    CashFlowViewSet, ReportViewSet,
+    DeviceViewSet, MaintenanceLogViewSet # <--- Import viewset mới
 )
 
 router = DefaultRouter()
@@ -16,7 +17,11 @@ router.register(r'products', ProductViewSet)
 router.register(r'customers', CustomerViewSet)
 router.register(r'users', UserViewSet)
 router.register(r'cash-flows', CashFlowViewSet)
-router.register(r'reports', ReportViewSet, basename='reports') # <--- QUAN TRỌNG: Dòng này tạo link API
+router.register(r'reports', ReportViewSet, basename='reports')
+
+# --- API MỚI CHO THIẾT BỊ ---
+router.register(r'devices', DeviceViewSet)
+router.register(r'maintenance-logs', MaintenanceLogViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),
